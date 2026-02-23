@@ -1,0 +1,11 @@
+.\objects\main.o: User\main.c
+.\objects\main.o: .\Hardware\USART\usart.h
+.\objects\main.o: .\Start\stm32f10x.h
+.\objects\main.o: .\Start\core_cm3.h
+.\objects\main.o: D:\Tools\KeilMDK\ARM\arm5_compiler\Bin\..\include\stdint.h
+.\objects\main.o: .\Start\system_stm32f10x.h
+.\objects\main.o: D:\Tools\KeilMDK\ARM\arm5_compiler\Bin\..\include\stdio.h
+.\objects\main.o: .\Interface\EEPROM\m24c02.h
+.\objects\main.o: .\Hardware\I2C\i2c.h
+.\objects\main.o: .\User\delay.h
+.\objects\main.o: D:\Tools\KeilMDK\ARM\arm5_compiler\Bin\..\include\string.h

@@ -1,0 +1,15 @@
+--cpu Cortex-M3
+".\objects\core_cm3.o"
+".\objects\startup_stm32f10x_hd.o"
+".\objects\system_stm32f10x.o"
+".\objects\main.o"
+".\objects\delay.o"
+".\objects\led.o"
+".\objects\key.o"
+".\objects\usart.o"
+".\objects\i2c.o"
+".\objects\m24c02.o"
+--library_type=microlib --strict --scatter ".\Objects\led_register.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list ".\Listings\led_register.map" -o .\Objects\led_register.axf
