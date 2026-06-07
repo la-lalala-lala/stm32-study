@@ -1,6 +1,0 @@
-{
-    "files.associations": {
-        "i2c.h": "c",
-        "m24c02.h": "c"
-    }
-}
