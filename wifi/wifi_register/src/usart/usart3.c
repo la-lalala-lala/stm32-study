@@ -1,9 +1,5 @@
 #include "usart3.h"
 
-#define USART3_TX_TIMEOUT          1000000U
-#define USART3_RX_FIRST_TIMEOUT    3000000U
-#define USART3_RX_NEXT_TIMEOUT      300000U
-
 // 波特率计算，MHz，波特率
 static uint16_t calculate_bpr(uint32_t pclk,uint32_t bound){
     float temp;
@@ -19,16 +15,20 @@ static uint16_t calculate_bpr(uint32_t pclk,uint32_t bound){
     return mantissa;
 }
 
-void usart3_init(void){
-    // USART3 使用默认映射：PB10=TX，PB11=RX
-    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN | RCC_APB2ENR_AFIOEN;
+void Driver_USART3_Init(void){
+    // 1. 配置时钟
+    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
     RCC->APB1ENR |= RCC_APB1ENR_USART3EN;
 
+    // 复位
+    RCC->APB2ENR |= RCC_APB2ENR_AFIOEN;
     RCC->APB1RSTR |= RCC_APB1RSTR_USART3RST;
     RCC->APB1RSTR &= ~RCC_APB1RSTR_USART3RST;
 
+    // 清除重映射
     AFIO->MAPR &= ~AFIO_MAPR_USART3_REMAP;
 
+    // 2.GPIO 工作模式
     // PB10: USART3_TX 复用推挽输出，CNF-10，MODE-11
     GPIOB->CRH &= ~(GPIO_CRH_MODE10 | GPIO_CRH_CNF10);
     GPIOB->CRH |= (GPIO_CRH_MODE10 | GPIO_CRH_CNF10_1);
@@ -37,86 +37,91 @@ void usart3_init(void){
     GPIOB->CRH &= ~(GPIO_CRH_MODE11 | GPIO_CRH_CNF11);
     GPIOB->CRH |= GPIO_CRH_CNF11_0;
 
-    USART3->CR1 &= ~USART_CR1_UE;
+    // 3. 串口配置
+    // 3.1 波特率设置
     USART3->BRR = calculate_bpr(36,115200);
-    USART3->CR1 &= ~(USART_CR1_M | USART_CR1_PCE);
-    USART3->CR2 &= ~USART_CR2_STOP;
+    // 3.2 收发使能及模块使能
     USART3->CR1 |= (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE);
+
+    // 3.3 配置一个字的长度 8位
+    USART3->CR1 &= ~USART_CR1_M;
+    // 3.4 配置不需要校验位
+    USART3->CR1 &= ~USART_CR1_PCE;
+    // 3.5 配置停止位的长度
+    USART3->CR2 &= ~USART_CR2_STOP;
+    
 }
 
-uint8_t usart3_send(uint8_t ch){
-    uint32_t timeout = USART3_TX_TIMEOUT;
-
+/**
+ * 发送一个字节
+ * uint8_t ch: 需要发送的一个字节
+ */
+void Driver_USART3_SendChar(uint8_t ch)
+{
+    // 往DR寄存器直接写 -> 发送数据
+    // 需要等待上一个字节发送完成之后  ->  才能发送下一个字节
+    // SR_TXE   如果数据正在发 ->  0
+    //          如果数据发生完成 -> 1
     while ((USART3->SR & USART_SR_TXE) == 0)
-    {
-        if (timeout-- == 0)
-        {
-            return 0;
-        }
-    }
+        ;
 
     USART3->DR = ch;
-    return 1;
 }
 
-uint8_t usart3_receive(uint8_t *ch, uint32_t timeout){
+/**
+ * 接收一个字节
+ * return: uint8_t 接收到的字节
+ */
+uint8_t Driver_USART3_ReceiveChar(void)
+{
+    // 接收数据也需要挂起 -> 等待有数据传入
+    // SR_RXNE : 有数据进来 -> 1
+    //           读取一次之后 -> 0
     while ((USART3->SR & USART_SR_RXNE) == 0)
-    {
-        if (timeout-- == 0)
-        {
-            return 0;
-        }
-    }
-
-    *ch = USART3->DR;
-    return 1;
+        ;
+    return USART3->DR;
 }
 
-uint8_t usart3_send_string(const uint8_t *str,uint16_t size){
-    for (uint16_t i = 0; i < size; i++)
+/**
+ * 发送多个字节
+ * uint8_t *str: 一个字符串
+ * uint8_t len: 字符串长度
+ */
+void Driver_USART3_SendString(uint8_t *str, uint8_t len)
+{
+    for (uint8_t i = 0; i < len; i++)
     {
-        if (usart3_send(str[i]) == 0)
-        {
-            return 0;
-        }
+        Driver_USART3_SendChar(str[i]);
     }
-
-    return 1;
 }
 
-uint16_t usart3_receive_string(uint8_t buffer[],uint16_t size){
-    uint16_t i = 0;
-    uint8_t ch = 0;
-    uint32_t timeout = USART3_RX_FIRST_TIMEOUT;
-
-    if (size == 0)
+/**
+ * 接收多个字节  ->  由于不能确定接收数据的长度 ->  推荐buff够大
+ * 收到空闲位结束
+ * uint8_t buff[]: 存接收到的数据
+ * uint8_t * len: 实际接收数据的长度 -> 需要函数中赋值
+ */
+void Driver_USART3_ReceiveString(uint8_t buff[], uint8_t *len)
+{
+    uint8_t i = 0;
+    while (1)
     {
-        return 0;
-    }
-
-    while (i < (size - 1))
-    {
-        if (usart3_receive(&ch, timeout) == 0)
+        // 1. 收到数据  存缓存
+        if (USART3->SR & USART_SR_RXNE)
         {
+            buff[i] = USART3->DR;
+            i++;
+        }
+
+        // 2. 收到空闲 停止
+        if (USART3->SR & USART_SR_IDLE)
+        {
+
+            *len = i;
             break;
         }
-
-        buffer[i++] = ch;
-        timeout = USART3_RX_NEXT_TIMEOUT;
+        // 3. 挂起等待
+        // while ((USART3->SR & USART_SR_RXNE) == 0)
+        //     ;
     }
-
-    buffer[i] = '\0';
-    return i;
-}
-
-uint32_t usart3_debug_status(void){
-    return USART3->SR;
-}
-
-uint8_t usart3_rx_pin_level(void){
-    return (GPIOB->IDR & GPIO_IDR_IDR11) ? 1U : 0U;
-}
-
-uint8_t usart3_tx_pin_level(void){
-    return (GPIOB->IDR & GPIO_IDR_IDR10) ? 1U : 0U;
 }
