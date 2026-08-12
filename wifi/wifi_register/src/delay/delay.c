@@ -1,20 +1,38 @@
 #include "delay.h"
 
-// 延时函数，微秒作为单位，利用系统嘀嗒定时器，72MHz，一次嘀嗒 1/72 us
+static uint8_t cycle_counter_initialized = 0;
+
+static void Delay_InitCycleCounter(void)
+{
+	if (cycle_counter_initialized == 0U)
+	{
+		CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+		DWT->CYCCNT = 0;
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+		cycle_counter_initialized = 1U;
+	}
+}
+
+uint32_t Delay_GetCycleCount(void)
+{
+	Delay_InitCycleCounter();
+	return DWT->CYCCNT;
+}
+
+uint8_t Delay_TimeoutElapsed(uint32_t start_cycles, uint32_t timeout_ms)
+{
+	const uint32_t timeout_cycles = (SystemCoreClock / 1000U) * timeout_ms;
+	return ((uint32_t)(Delay_GetCycleCount() - start_cycles) >= timeout_cycles);
+}
+
 void Delay_us(uint16_t us)
 {
-	// 1. 装载一个计数值，72 * us
-	SysTick->LOAD = 72 * us;
+	const uint32_t start_cycles = Delay_GetCycleCount();
+	const uint32_t wait_cycles = (SystemCoreClock / 1000000U) * us;
 
-	// 2. 配置，使用系统时钟（1），计数结束不产生中断（0），使能定时器（1）
-	SysTick->CTRL = 0x05;
-
-	// 3. 等待计数值变为0，判断CTRL标志位COUNTFLAG是否为1
-	while ((SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk) == 0)
-	{}
-	
-	// 4. 关闭定时器
-	SysTick->CTRL &= ~SysTick_CTRL_ENABLE_Msk;
+	while ((uint32_t)(Delay_GetCycleCount() - start_cycles) < wait_cycles)
+	{
+	}
 }
 
 void Delay_ms(uint16_t ms)

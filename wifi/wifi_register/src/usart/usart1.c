@@ -1,23 +1,25 @@
 #include "usart1.h"
 
-// 波特率计算，MHZ，波特率
-static uint16_t calculate_bpr(uint32_t pclk2,uint32_t bound){
-    float temp;
-	uint16_t mantissa;                
-	uint16_t fraction;	   
-	temp=(float)(pclk2*1000000)/(bound*16);//得到USARTDIV
-	mantissa=temp;				 //得到整数部分
-	fraction=(temp-mantissa)*16; //得到小数部分	 
-    mantissa<<=4;
-	mantissa+=fraction;
-    return mantissa;
+#define USART1_LEGACY_RX_CAPACITY             255U
+#define USART1_LEGACY_FIRST_BYTE_TIMEOUT_MS   1000U
+#define USART1_LEGACY_INTER_BYTE_TIMEOUT_MS   10U
+
+/*
+ * USART1 挂载在 APB2。SystemCoreClock 表示 HCLK，因此还需要解析 PPRE2
+ * 才能得到实际外设时钟，不能固定假设为 72 MHz。系统回退到 HSI 时，
+ * 该计算也能让波特率跟随实际时钟调整。
+ */
+static uint32_t USART1_GetPeripheralClock(void)
+{
+    SystemCoreClockUpdate();
+    const uint32_t ppre2 = (RCC->CFGR & RCC_CFGR_PPRE2) >> RCC_CFGR_PPRE2_Pos;
+    // PPRE2 编码：0xx=/1，100=/2，101=/4，110=/8，111=/16。
+    const uint32_t divider = (ppre2 < 4U) ? 1U : (1U << (ppre2 - 3U));
+    return SystemCoreClock / divider;
 }
 
 // 初始化
 void Driver_USART1_Init(void){
-    // 必须设置时钟频率
-    // uint32_t system_clock_freq = 72000000; // Set system clock frequency (72 MHz)
-    // SystemClock_Config(system_clock_freq);
     // 1. 配置时钟
     RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
     RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
@@ -32,17 +34,18 @@ void Driver_USART1_Init(void){
     // 2.GPIO 工作模式
     // PA9: TX 复用推挽输出，CNF-10，MODE-11
     // PA10: RX 浮空输入，CNF-01，MODE-00
-    GPIOA->CRH |= GPIO_CRH_MODE9;
-    GPIOA->CRH |= GPIO_CRH_CNF9_1;
-    GPIOA->CRH &= ~GPIO_CRH_CNF9_0;
+    // 每个引脚在 CRH 中占 4 位；先清除完整字段，避免残留配置影响最终模式。
+    GPIOA->CRH &= ~(GPIO_CRH_MODE9 | GPIO_CRH_CNF9);
+    GPIOA->CRH |= GPIO_CRH_MODE9 | GPIO_CRH_CNF9_1;
 
-    GPIOA->CRH &= ~GPIO_CRH_MODE10;
-    GPIOA->CRH &= ~GPIO_CRH_CNF10_1;
+    GPIOA->CRH &= ~(GPIO_CRH_MODE10 | GPIO_CRH_CNF10);
     GPIOA->CRH |= GPIO_CRH_CNF10_0;
 
     // 3. 串口配置
     // 3.1 波特率设置
-    USART1->BRR = calculate_bpr(72,115200);
+    const uint32_t pclk2 = USART1_GetPeripheralClock();
+    // 16 倍过采样时 BRR 编码等价于 PCLK2/baud；加 baud/2 完成整数四舍五入。
+    USART1->BRR = (pclk2 + (115200U / 2U)) / 115200U;
 
     // 3.2 收发使能及模块使能
     USART1->CR1 |= (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE);
@@ -98,59 +101,76 @@ void Driver_USART1_SendString(uint8_t *str, uint8_t len)
     }
 }
 
-/**
- * 接收多个字节  ->  由于不能确定接收数据的长度 ->  推荐buff够大
- * 收到空闲位结束
- * uint8_t buff[]: 存接收到的数据
- * uint8_t * len: 实际接收数据的长度 -> 需要函数中赋值
- */
-void Driver_USART1_ReceiveString(uint8_t buff[], uint8_t *len)
+void Driver_USART1_FlushReceive(void)
 {
-    uint8_t i = 0;
-    while (1)
+    volatile uint32_t discard;
+
+    /*
+     * STM32F1 通过“先读 SR、再读 DR”清除 IDLE 和接收错误标志。
+     * 循环同时排空当前 RXNE 数据；本函数会主动丢弃尚未处理的接收字节。
+     */
+    do
     {
-        // 1. 收到数据  存缓存
-        if (USART1->SR & USART_SR_RXNE)
-        {
-            buff[i] = USART1->DR;
-            i++;
-        }
+        discard = USART1->SR;
+        discard = USART1->DR;
+    } while ((USART1->SR & USART_SR_RXNE) != 0U);
 
-        // 2. 收到空闲 停止
-        if (USART1->SR & USART_SR_IDLE)
-        {
-
-            *len = i;
-            break;
-        }
-        // 3. 挂起等待
-        // while ((USART1->SR & USART_SR_RXNE) == 0)
-        //     ;
-    }
+    (void)discard;
 }
 
-// void Driver_USART1_ReceiveString(uint8_t buff[], uint8_t *len)
-// {
-//     uint8_t i = 0;
-//     while (1)
-//     {
-//         // 3. 需要挂起
-//         while ((USART1->SR & USART_SR_RXNE) == 0)
-//         {
-//             // 2. 接收到空闲位 -> break
-//             if (USART1->SR & USART_SR_IDLE)
-//             {
-//                 // 接收完成
-//                 *len = i;
-//                 return;
-//             }
-//         }
-//         // 1. 接收到数据 -> 存buff len+1
-//         buff[i] = USART1->DR;
-//         i++;
-//     }
-// }
+uint16_t Driver_USART1_ReceiveString(
+    uint8_t buff[], uint16_t capacity,
+    uint32_t first_byte_timeout_ms, uint32_t inter_byte_timeout_ms)
+{
+    if ((buff == NULL) || (capacity == 0U))
+    {
+        return 0U;
+    }
 
+    uint16_t length = 0U;
+    uint32_t wait_start = Delay_GetCycleCount();
+    uint32_t last_byte = wait_start;
+
+    while (length < capacity)
+    {
+        const uint32_t status = USART1->SR;
+
+        if ((status & USART_SR_RXNE) != 0U)
+        {
+            const uint8_t byte = (uint8_t)USART1->DR;
+            if ((status & (USART_SR_FE | USART_SR_NE | USART_SR_PE)) == 0U)
+            {
+                buff[length++] = byte;
+            }
+            last_byte = Delay_GetCycleCount();
+            continue;
+        }
+
+        /*
+         * 未启用 IDLE 中断时不必专门清除 IDLE。若在此额外执行一次 SR->DR
+         * 清除序列，可能误读并丢弃恰好在两次读取之间到达的新字节。
+         */
+        if ((status & (USART_SR_ORE | USART_SR_NE |
+                       USART_SR_FE | USART_SR_PE)) != 0U)
+        {
+            volatile uint32_t discard = USART1->DR;
+            (void)discard;
+        }
+
+        if ((length == 0U) &&
+            Delay_TimeoutElapsed(wait_start, first_byte_timeout_ms))
+        {
+            break;
+        }
+        if ((length > 0U) &&
+            Delay_TimeoutElapsed(last_byte, inter_byte_timeout_ms))
+        {
+            break;
+        }
+    }
+
+    return length;
+}
 
 
 int fputc(int ch,FILE *file)

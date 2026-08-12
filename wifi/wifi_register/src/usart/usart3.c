@@ -1,18 +1,17 @@
 #include "usart3.h"
 
-// 波特率计算，MHz，波特率
-static uint16_t calculate_bpr(uint32_t pclk,uint32_t bound){
-    float temp;
-    uint16_t mantissa;
-    uint16_t fraction;
-
-    temp=(float)(pclk*1000000)/(bound*16);//得到USARTDIV
-    mantissa=temp;               //得到整数部分
-    fraction=(temp-mantissa)*16; //得到小数部分
-    mantissa<<=4;
-    mantissa+=fraction;
-
-    return mantissa;
+/*
+ * USART3 挂载在 APB1。SystemCoreClock 表示 HCLK，因此还需要解析 PPRE1
+ * 才能得到实际外设时钟，不能固定假设为 36 MHz。系统回退到 HSI 时，
+ * 该计算也能让波特率跟随实际时钟调整。
+ */
+static uint32_t USART3_GetPeripheralClock(void)
+{
+    SystemCoreClockUpdate();
+    const uint32_t ppre1 = (RCC->CFGR & RCC_CFGR_PPRE1) >> RCC_CFGR_PPRE1_Pos;
+    // PPRE1 编码：0xx=/1，100=/2，101=/4，110=/8，111=/16。
+    const uint32_t divider = (ppre1 < 4U) ? 1U : (1U << (ppre1 - 3U));
+    return SystemCoreClock / divider;
 }
 
 void Driver_USART3_Init(void){
@@ -39,7 +38,9 @@ void Driver_USART3_Init(void){
 
     // 3. 串口配置
     // 3.1 波特率设置
-    USART3->BRR = calculate_bpr(36,115200);
+    const uint32_t pclk1 = USART3_GetPeripheralClock();
+    // 16 倍过采样时 BRR 编码等价于 PCLK1/baud；加 baud/2 完成整数四舍五入。
+    USART3->BRR = (pclk1 + (115200U / 2U)) / 115200U;
     // 3.2 收发使能及模块使能
     USART3->CR1 |= (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE);
 
@@ -59,9 +60,8 @@ void Driver_USART3_Init(void){
 void Driver_USART3_SendChar(uint8_t ch)
 {
     // 往DR寄存器直接写 -> 发送数据
-    // 需要等待上一个字节发送完成之后  ->  才能发送下一个字节
-    // SR_TXE   如果数据正在发 ->  0
-    //          如果数据发生完成 -> 1
+    // TXE=1 仅表示发送数据寄存器为空、可以写入下一字节，不表示线路发送已完成；
+    // 如需确认最后一个停止位已经发出，应另外等待 TC=1。
     while ((USART3->SR & USART_SR_TXE) == 0)
         ;
 
@@ -83,45 +83,82 @@ uint8_t Driver_USART3_ReceiveChar(void)
 }
 
 /**
- * 发送多个字节
- * uint8_t *str: 一个字符串
- * uint8_t len: 字符串长度
+ * @brief 发送指定长度的数据
+ * @param str 数据地址；由 len 指定长度，因此不要求以 '\0' 结尾
+ * @param len 发送字节数
  */
-void Driver_USART3_SendString(uint8_t *str, uint8_t len)
+void Driver_USART3_SendString(const char *str, uint16_t len)
 {
-    for (uint8_t i = 0; i < len; i++)
+    for (uint16_t i = 0; i < len; i++)
     {
-        Driver_USART3_SendChar(str[i]);
+        Driver_USART3_SendChar((uint8_t)str[i]);
     }
 }
 
-/**
- * 接收多个字节  ->  由于不能确定接收数据的长度 ->  推荐buff够大
- * 收到空闲位结束
- * uint8_t buff[]: 存接收到的数据
- * uint8_t * len: 实际接收数据的长度 -> 需要函数中赋值
- */
-void Driver_USART3_ReceiveString(uint8_t buff[], uint8_t *len)
+void Driver_USART3_FlushReceive(void)
 {
-    uint8_t i = 0;
-    while (1)
+    volatile uint32_t discard;
+
+    /*
+     * STM32F1 通过“先读 SR、再读 DR”清除 IDLE 和接收错误标志。
+     * 循环同时排空当前 RXNE 数据；本函数会主动丢弃尚未处理的接收字节。
+     */
+    do
     {
-        // 1. 收到数据  存缓存
-        if (USART3->SR & USART_SR_RXNE)
+        discard = USART3->SR;
+        discard = USART3->DR;
+    } while ((USART3->SR & USART_SR_RXNE) != 0U);
+
+    (void)discard;
+}
+
+uint16_t Driver_USART3_ReceiveString(uint8_t buff[], uint16_t capacity,
+                                    uint32_t first_byte_timeout_ms,
+                                    uint32_t inter_byte_timeout_ms)
+{
+    uint16_t length = 0;
+    // 首字节超时从函数进入时开始；字节间超时在每次读取 DR 后重新计时。
+    uint32_t wait_start = Delay_GetCycleCount();
+    uint32_t last_byte = wait_start;
+
+    while (length < capacity)
+    {
+        // 先保存 SR，使错误状态与随后从 DR 读出的字节保持对应。
+        const uint32_t status = USART3->SR;
+
+        if ((status & USART_SR_RXNE) != 0U)
         {
-            buff[i] = USART3->DR;
-            i++;
+            const uint8_t byte = (uint8_t)USART3->DR;
+            if ((status & (USART_SR_FE | USART_SR_NE | USART_SR_PE)) == 0U)
+            {
+                buff[length++] = byte;
+            }
+            last_byte = Delay_GetCycleCount();
+            continue;
         }
 
-        // 2. 收到空闲 停止
-        if (USART3->SR & USART_SR_IDLE)
+        /*
+         * 未启用 IDLE 中断时不必专门清除 IDLE。若在此额外执行一次 SR->DR
+         * 清除序列，可能误读并丢弃恰好在两次读取之间到达的新字节。
+         */
+        if ((status & (USART_SR_ORE | USART_SR_NE |
+                       USART_SR_FE | USART_SR_PE)) != 0U)
         {
+            volatile uint32_t discard = USART3->DR;
+            (void)discard;
+        }
 
-            *len = i;
+        // 尚未保存有效字节时，只应用首字节等待超时。
+        if ((length == 0U) && Delay_TimeoutElapsed(wait_start, first_byte_timeout_ms))
+        {
             break;
         }
-        // 3. 挂起等待
-        // while ((USART3->SR & USART_SR_RXNE) == 0)
-        //     ;
+        // 已有数据后，以连续静默时间判断本批不定长数据结束。
+        if ((length > 0U) && Delay_TimeoutElapsed(last_byte, inter_byte_timeout_ms))
+        {
+            break;
+        }
     }
+
+    return length;
 }

@@ -7,7 +7,9 @@
 #include "../delay/delay.h"
 
 #define RESPONSE_OK "OK"
-#define RESPONSE_READY "ready"
+
+#define ESP32_SUCCESS 1U
+#define ESP32_ERROR   0U
 
 /**
  * esp32 c3 模组连接 stm32说明
@@ -21,24 +23,83 @@
 /**
  * @description: 初始化ESP32
  */
-void ESP32_Init(void);
+uint8_t ESP32_Init(void);
 
 /**
  * @description: 发送AT指令
- * @param {uint8_t} *cmd 要发送的AT指令(指令必须以 \r\n结束)
- * @param {uint16_t} cmd_length 指令长度
- * @param {unin16_t} expect_result 期待的返回
+ * @param cmd 要发送的AT指令(指令必须以 \r\n结束)
+ * @param expect_result 期待的响应字符串
+ * @param timeout_ms 等待响应的总超时时间
  */
-uint8_t ESP32_Send_CMD(const char *cmd, uint16_t cmd_length,char * expect_result);
+uint8_t ESP32_Send_CMD(const char *cmd, const char *expect_result,
+                       uint32_t timeout_ms);
 
 /**
  * @description: 发送AT指令后，用来接收响应
  *          要考虑到接收的响应为非定长数据。
  *
- * @param {uint8_t} respone_buff[] 存储接收的的响应的缓冲区。
- * @param {unin16_t} size 缓冲区的长度
+ * @param response_buffer 存储接收响应的缓冲区
+ * @param size 缓冲区的长度
+ * @param timeout_ms 等待首字节的超时时间
  */
 
-uint16_t ESP32_ReadResponse(uint8_t respone_buff[], uint16_t size);
+uint16_t ESP32_ReadResponse(uint8_t response_buffer[], uint16_t size,
+                            uint32_t timeout_ms);
+
+
+/**
+ * @description: 开发板连接路由器的热点（Station模式）
+ * @return 是否连接成功
+ */
+uint8_t ESP32_Start_Station(void);
+
+/**
+ * @description: 开发板作为热点（AP模式），电脑连接开发板的热点（开发板开局域网），只能作为内网
+ */
+void ESP32_Start_AP(void);            
+
+/**
+ * @description: 开发板开启TCP服务
+ */
+void Esp32_Start_TCP_Server(void);
+
+/**
+ * @description: 开发板连接TCP服务
+ * @return 是否连接成功
+ */
+uint8_t Esp32_Start_TCP_Client(void);
+
+
+/**
+ * @description: 开发板连接UDP服务
+ * @return 是否连接成功
+ */
+uint8_t Esp32_Start_UDP_Client(void);
+
+/**
+ * @description: 接收TCP服务端的数据，串口3将数据从esp32 c3发送给stm32
+ * @param rxbuff 缓冲区
+ * @param max_size 缓冲区最大长度
+ * @param real_receive_len 实际接收的长度
+ * @param id 连接id
+ * @param ip 客户端IP
+ * @param port 客户端端口
+ */
+void Esp32_Read_Data(uint8_t rxbuff[],
+                                uint16_t max_size,
+                                uint16_t *real_receive_len,
+                                uint8_t *id,
+                                uint8_t ip[],
+                                uint16_t *port);
+
+/**
+ * @description: 发送TCP服务端的数据，stm32将数据从串口3发送给esp32 c3
+ * @param txbuff 缓冲区
+ * @param tx_len 缓冲区长度
+ * @param id TCP连接id
+ */
+void Esp32_Send_Data(uint8_t txbuff[],
+                                uint16_t tx_len,
+                                uint8_t *id);
 
 #endif
