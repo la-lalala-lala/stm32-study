@@ -308,8 +308,5 @@ void Esp32_Send_Data(uint8_t txbuff[],
     Driver_USART3_SendString(txbuff, tx_len);
 }
 
-git add wifi/wifi_register/src
-git add wifi/wifi_register/战舰V4 硬件参考手册_V1.0.pdf
-git add wifi/wifi_register/ATK-MB026 WIFI & BLE模块
-git add wifi/wifi_register/platformio.ini
-git add wifi/wifi_register/README.md
+
+
