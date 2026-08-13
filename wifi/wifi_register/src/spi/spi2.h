@@ -1,5 +1,5 @@
-#ifndef __DRIVER_SPI_H
-#define __DRIVER_SPI_H
+#ifndef __DRIVER_SPI2_H
+#define __DRIVER_SPI2_H
 
 #include "stm32f1xx.h"
 #include "delay/delay.h"
@@ -14,12 +14,12 @@
 #define CS_LOW (GPIOB->ODR &= ~GPIO_ODR_ODR12)
 
 
-void spi_init(void);
+void spi2_init(void);
 
-void spi_start(void);
+void spi2_start(void);
 
-void spi_stop(void);
+void spi2_stop(void);
 
-uint8_t spi_swap_byte(uint8_t ch);
+uint8_t spi2_swap_byte(uint8_t ch);
 
 #endif

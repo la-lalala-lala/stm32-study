@@ -1,4 +1,4 @@
-#include "spi.h"
+#include "spi2.h"
 
 // NM25Q128 芯片
 // CS PB12
@@ -6,7 +6,7 @@
 // MISO PB14
 // MOSI PB15
 
-void spi_init(void){
+void spi2_init(void){
     // 本实验用到 SPI2,使用 PB13、PB14 和 PB15 作为 SPI_SCK、SPI_MISO 和 SPI_MOSI
     /* 1. 打开时钟  SPI2时钟，打开GPIO引脚时钟 PB*/
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
@@ -55,15 +55,15 @@ void spi_init(void){
     SPI2->CR1 |= SPI_CR1_SPE;
 }
 
-void spi_start(void){
+void spi2_start(void){
     CS_LOW;
 }
 
-void spi_stop(void){
+void spi2_stop(void){
     CS_HIGH;
 }
 
-uint8_t spi_swap_byte(uint8_t ch){
+uint8_t spi2_swap_byte(uint8_t ch){
     // 对应SPI的时序  => 写缓存是交换数据之前写
     //          读缓存 => 交换数据完成之后再读的
     /* 1. 先写缓存  */

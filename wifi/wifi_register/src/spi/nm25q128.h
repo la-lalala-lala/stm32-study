@@ -1,7 +1,7 @@
 #ifndef __INF_NM25Q128_H
 #define __INF_NM25Q128_H
 
-#include "spi.h"
+#include "spi2.h"
 
 #define NM25Q128_MANUFACTURER_ID 0x52U
 #define NM25Q128_MEMORY_TYPE     0x21U
