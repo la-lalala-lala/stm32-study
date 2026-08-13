@@ -1,5 +1,5 @@
-#ifndef __ESP32_H
-#define __ESP32_H
+#ifndef __DRIVER_ESP32_H
+#define __DRIVER_ESP32_H
 #include <stm32f1xx.h>
 #include "stdio.h"
 #include "string.h"
@@ -46,35 +46,6 @@ uint8_t ESP32_Send_CMD(const char *cmd, const char *expect_result,
 uint16_t ESP32_ReadResponse(uint8_t response_buffer[], uint16_t size,
                             uint32_t timeout_ms);
 
-
-/**
- * @description: 开发板连接路由器的热点（Station模式）
- * @return 是否连接成功
- */
-uint8_t ESP32_Start_Station(void);
-
-/**
- * @description: 开发板作为热点（AP模式），电脑连接开发板的热点（开发板开局域网），只能作为内网
- */
-void ESP32_Start_AP(void);            
-
-/**
- * @description: 开发板开启TCP服务
- */
-void Esp32_Start_TCP_Server(void);
-
-/**
- * @description: 开发板连接TCP服务
- * @return 是否连接成功
- */
-uint8_t Esp32_Start_TCP_Client(void);
-
-
-/**
- * @description: 开发板连接UDP服务
- * @return 是否连接成功
- */
-uint8_t Esp32_Start_UDP_Client(void);
 
 /**
  * @description: 接收TCP服务端的数据，串口3将数据从esp32 c3发送给stm32
